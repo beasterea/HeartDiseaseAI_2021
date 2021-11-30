@@ -80,14 +80,14 @@ class ResBlock(nn.Module):
     )
   
   def forward(self, x):
-    print(f"res block input shape : {x.shape}")
+    #print(f"res block input shape : {x.shape}")
     out = self.conv_1(x) #(N, channel_in, H, W)
-    print(f"res block out1 shape : {out.shape}")
+    #print(f"res block out1 shape : {out.shape}")
     out = self.conv_2(out) #(N, channel_out, H, W)
 
 
     x = self.skip(x) #(N, channel_in, H, W)
-    print(out.shape, x.shape)
+    #print(out.shape, x.shape)
     return self.relu(out + x) #(N, channel_out, H, W)
 
 class CSEBlock(nn.Module):
@@ -108,14 +108,14 @@ class HeartSarUnet(nn.Module):
     super(HeartSarUnet, self).__init__()
     self.down_channels = [channel_in_start * (2**(i-1)) for i in range(1,5)]
     self.down_channels = [first_channel]+self.down_channels # [first_channel, 64, 128, 256, 512]
-    print(self.down_channels)
+    #print(self.down_channels)
     self.mid_channels = [channel_mid_start * (2**i) for i in range(4)] # [4, 8, 16, 32]
-    print(self.mid_channels)
+    #print(self.mid_channels)
     self.up_channels = [channel_in_start * (2**i) for i in range(4, -1, -1)] # [1024, 512, 256, 128, 64]
-    print(self.up_channels)
+    #print(self.up_channels)
 
     self.cat_channels = [self.down_channels[4-i]+self.up_channels[i] for i in range(5)] # [1536, 756, 384, 192]
-    print(self.cat_channels)
+    #print(self.cat_channels)
     self.down_1 = CSEBlock(channel_in = self.down_channels[0], channel_mid = self.down_channels[1], channel_out = self.mid_channels[0]) # (0, 64, 4)
     self.down_2 = CSEBlock(channel_in = self.down_channels[1], channel_mid = self.down_channels[2], channel_out = self.mid_channels[1]) # (64, 128, 8)
     self.down_3 = CSEBlock(channel_in = self.down_channels[2], channel_mid = self.down_channels[3], channel_out = self.mid_channels[2]) # (128, 256, 16)

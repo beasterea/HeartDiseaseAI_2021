@@ -21,6 +21,7 @@ class BCEDiceLoss(nn.Module):
 
   def forward(self, x, target, input_shape):
     x = self._crop(x, input_shape)
+    target = self._crop(target, input_shape)
     bce = F.binary_cross_entropy_with_logits(x, target)
     smooth = 1e-5
     x = torch.sigmoid(x)

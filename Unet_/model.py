@@ -5,7 +5,7 @@ __all__ = ['UNet', 'UNetPP', 'ARUNet'] # UNet, nested improved UNet인 deep supe
 
 class VGGBlock(nn.Module):
   def __init__(self, channel_in, channel_mid, channel_out):
-    super(VGGBlock, self).__init__()
+    super().__init__()
     self.relu = nn.ReLU(inplace = True)
     self.conv1 = nn.Conv2d(in_channels = channel_in, out_channels = channel_mid, kernel_size = 3, padding = 1)
     self.bn1 = nn.BatchNorm2d(channel_mid)
@@ -24,8 +24,8 @@ class VGGBlock(nn.Module):
     return out
 
 class UNet(nn.Module):
-  def __init__(self, num_classes, channel_in = 4, start_filter = 32):
-    super(UNet, self).__init__()
+  def __init__(self, num_classes, channel_in = 3, start_filter = 32):
+    super().__init__()
 
     self.filters = []
     for i in range(5):
@@ -64,8 +64,8 @@ class UNet(nn.Module):
     return out
 
 class UNetPP(nn.Module):
-    def __init__(self, num_classes, deep_supervision = True, channel_in = 4, start_filter = 32):
-        super(UNetPP,self).__init__()
+    def __init__(self, num_classes, deep_supervision = True, channel_in = 3, start_filter = 16):
+        super().__init__()
 
         nb_filter = []
         for i in range(5):

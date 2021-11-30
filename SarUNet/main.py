@@ -13,9 +13,9 @@ from torch.optim import lr_scheduler
 from tqdm import tqdm
 
 
-from model import HeartSarUnet
+from sarunet_model import HeartSarUnet
 from losses import BCEDiceLoss
-import model
+import sarunet_model
 import losses
 from dataset import HeartDiseaseDataset
 from metrics import iou_score
@@ -23,19 +23,20 @@ from utils import AverageMeter, str2bool
 
 import pandas as pd
 
-MODEL_NAMES = model.__all__
+MODEL_NAMES = sarunet_model.__all__
 LOSS_NAMES = losses.__all__
 LOSS_NAMES.append("BCEWithLogitsLoss")
 
 def parse_args():
   parser = argparse.ArgumentParser()
-  parser.add_argument('--dataset', help = 'Base directory of the dataset')
+  parser.add_argument('--dataset',default = '/content/drive/MyDrive/HeartDiseaseAI/DATA', help = 'Base directory of the dataset')
 
   # name of the model
   parser.add_argument('--name', default = None)
 
   # for the Net
-  parser.add_argumetn('--input_channels', default = 4, type = int)
+  parser.add_argument('--batch_size', default = 8, type = int)
+  parser.add_argument('--input_channels', default = 3, type = int)
   parser.add_argument('--model', metavar = 'MODEL',default = 'UNetPP',choices = MODEL_NAMES,
                       help = 'model architecture : ' + '|'.join(MODEL_NAMES))
   parser.add_argument('--loss', default = 'BCEDiceLoss', choices = LOSS_NAMES,
@@ -46,13 +47,14 @@ def parse_args():
   parser.add_argument('--lr', default = 1e-3, type = float, metavar = 'LR', help = 'learning rate') # 계속 변화를 줘야 하는 학습률
 
   # scheduler for learning rate
-  parser.add_argument('--scheduler', default = 'ReduceLROnPlateau',
+  parser.add_argument('--scheduler', default = 'CosineAnnealingLR',
                       choices = ['ReduceLROnPlateau', 'CosineAnnealingLR', 'MultiStepLR', 'ConstantLR'])
   parser.add_argument('--min_lr', default = 1e-5, type = float)
   parser.add_argument('--patience', default = 5, type = int)
   
 
   # optimizer
+  parser.add_argument('--epochs', default = 10, type = int)
   parser.add_argument('--optimizer', default = 'Adam',
                       choices = ['Adam','SGD'], help = 'optimizers : '+ '|'.join(['Adam', 'SGD']))
   parser.add_argument('--momentum', default = '0.09', type = float)
@@ -153,32 +155,30 @@ def main():
   train_dirs = glob(os.path.join(config['dataset'], 'train', '*', '*')) # A2C, A4C image 모두 
   valid_dirs = glob(os.path.join(config['dataset'], 'validation', '*', '*'))
 
-  train_img_ids = list(set([os.path.splittext(os.path.basename(p))[0] for p in train_dirs]))
-  valid_img_ids = list(set([os.path.splittext(os.path.basename(p))[0] for p in valid_dirs]))
+  train_img_ids = list(set([os.path.splitext(os.path.basename(p))[0] for p in train_dirs]))
+  valid_img_ids = list(set([os.path.splitext(os.path.basename(p))[0] for p in valid_dirs]))
 
   train_transform = Compose([
     transforms.Flip(),
-    transforms.RandomRotate90(),
     transforms.Normalize(),
   ])
 
   valid_transform = Compose([
-    transforms.Resize(config['input_shape'][0], config['input_shape'][1]),
     transforms.Normalize(),
   ])
 
   train_dataset = HeartDiseaseDataset(
       img_ids = train_img_ids,
-      img_dir = os.path.join(config['dataset'], 'train'),
-      mask_dir = os.path.join(config['dataset'], 'train'),
+      img_dir = os.path.join(config['dataset'], 'train', 'A2C'),
+      mask_dir = os.path.join(config['dataset'], 'train', 'A2C'),
       num_classes = config['num_classes'],
       transform = train_transform
   )
 
   valid_dataset = HeartDiseaseDataset(
       img_ids = valid_img_ids,
-      img_dir = os.path.join(config['dataset'], 'validation'),
-      mask_dir = os.path.join(config['dataset'], 'validation'),
+      img_dir = os.path.join(config['dataset'], 'validation', 'A2C'),
+      mask_dir = os.path.join(config['dataset'], 'validation', 'A2C'),
       num_classes = config['num_classes'],
       transform = valid_transform
   )
@@ -205,9 +205,9 @@ def main():
     print(f"Epoch {epoch} / {config['epochs']}")
 
     # train for one epoch
-    train_log = train(train_loader, net, criterion, optimizer, config)
+    train_log = train(net,train_loader, criterion, optimizer, config)
     # validate for one epoch
-    val_log = validate(valid_loader, net, criterion, config)
+    val_log = validate(net,valid_loader, criterion, config)
 
     if config['scheduler'] == 'CosineAnnealingLR':
       scheduler.step()
