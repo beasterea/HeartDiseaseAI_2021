@@ -20,6 +20,8 @@ from dataset import HeartDiseaseDataset
 from metrics import iou_score
 from utils import AverageMeter, str2bool
 
+import pandas as pd
+
 MODEL_NAMES = model.__all__
 LOSS_NAMES = losses.__all__
 LOSS_NAMES.append("BCEWithLogitsLoss")
@@ -46,7 +48,7 @@ def parse_args():
   parser.add_argument('--scheduler', default = 'ReduceLROnPlateau',
                       choices = ['ReduceLROnPlateau', 'CosineAnnealingLR', 'MultiStepLR', 'ConstantLR'])
   parser.add_argument('--min_lr', default = 1e-5, type = float)
-  parser.add_argumemt('--patience', default = 5, type = int)
+  parser.add_argument('--patience', default = 5, type = int)
   
 
   # optimizer

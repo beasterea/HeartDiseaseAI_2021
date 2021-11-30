@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-import torch.nn.Functional as F
+import torch.nn.functional as F
 import torchvision.transforms.functional as transF
 
 __all__ = ['BCEDiceLoss', 'LovaszHingeLoss']

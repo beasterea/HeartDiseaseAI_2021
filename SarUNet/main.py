@@ -21,6 +21,8 @@ from dataset import HeartDiseaseDataset
 from metrics import iou_score
 from utils import AverageMeter, str2bool
 
+import pandas as pd
+
 MODEL_NAMES = model.__all__
 LOSS_NAMES = losses.__all__
 LOSS_NAMES.append("BCEWithLogitsLoss")
@@ -47,7 +49,7 @@ def parse_args():
   parser.add_argument('--scheduler', default = 'ReduceLROnPlateau',
                       choices = ['ReduceLROnPlateau', 'CosineAnnealingLR', 'MultiStepLR', 'ConstantLR'])
   parser.add_argument('--min_lr', default = 1e-5, type = float)
-  parser.add_argumemt('--patience', default = 5, type = int)
+  parser.add_argument('--patience', default = 5, type = int)
   
 
   # optimizer
@@ -165,7 +167,7 @@ def main():
     transforms.Normalize(),
   ])
 
-  train_dataset = Dataset(
+  train_dataset = HeartDiseaseDataset(
       img_ids = train_img_ids,
       img_dir = os.path.join(config['dataset'], 'train'),
       mask_dir = os.path.join(config['dataset'], 'train'),
@@ -173,7 +175,7 @@ def main():
       transform = train_transform
   )
 
-  valid_dataset = Dataset(
+  valid_dataset = HeartDiseaseDataset(
       img_ids = valid_img_ids,
       img_dir = os.path.join(config['dataset'], 'validation'),
       mask_dir = os.path.join(config['dataset'], 'validation'),
@@ -205,7 +207,7 @@ def main():
     # train for one epoch
     train_log = train(train_loader, net, criterion, optimizer, config)
     # validate for one epoch
-    valid_log = validate(valid_loader, net, criterion, config)
+    val_log = validate(valid_loader, net, criterion, config)
 
     if config['scheduler'] == 'CosineAnnealingLR':
       scheduler.step()
