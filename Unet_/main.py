@@ -39,7 +39,7 @@ def parse_args():
                       help = 'model architecture : ' + '|'.join(MODEL_NAMES))
   parser.add_argument('--loss', default = 'BCEDiceLoss', choices = LOSS_NAMES,
                       help = 'loss function : ' + '|'.join(LOSS_NAMES))
-  parser.add_argument('--deep_supervision', default = False, type = str2bool)
+  parser.add_argument('--deep_supervision', default = True, type = str2bool)
   parser.add_argument('--num_classes', default = 1, type = int, help = 'num of output channel')
   parser.add_argument('--threshold', default = 0.5, type = float)
   parser.add_argument('--input_channels', default = 3, type = int)
@@ -59,6 +59,7 @@ def parse_args():
                       choices = ['Adam','SGD'], help = 'optimizers : '+ '|'.join(['Adam', 'SGD']))
   parser.add_argument('--momentum', default = '0.09', type = float)
   parser.add_argument('--weight_decay', default = 1e-4, type = float)
+
   config = parser.parse_args()
 
   return config
@@ -99,15 +100,15 @@ def train(net, train_loader, criterion, optimizer, config):
     loss.backward()
     optimizer.step()
 
-    avg_meters['loss'].upadate(loss.item(), input.size(0))
+    avg_meters['loss'].update(loss.item(), input.size(0))
     avg_meters['JI'].update(ji, input.size(0))
 
-    postfix = OrderedDict([('loss' , avg_meters['loss'].avg),('ji' , avg_meters['JI'].avg)])
+    postfix = OrderedDict([('loss' , avg_meters['loss'].avg),('JI' , avg_meters['JI'].avg)])
     pbar.set_postfix(postfix)
     pbar.update()
   pbar.close()
 
-  return OrderedDict([('loss', avg_meters['loss'].avg), ('ji', avg_meters['JI'].avg)])
+  return OrderedDict([('loss', avg_meters['loss'].avg), ('JI', avg_meters['JI'].avg)])
 
 def validate(net, valid_loader, criterion, config):
   avg_meters = {'loss': AverageMeter(),'JI': AverageMeter()}
@@ -136,14 +137,14 @@ def validate(net, valid_loader, criterion, config):
         ji = iou_score(output, target, input_shape)
     
       avg_meters['loss'].update(loss.item(), input.size(0))
-      avg_meters['iou'].update(ji, input.size(0))
+      avg_meters['JI'].update(ji, input.size(0))
 
-      postfix = OrderedDict([('loss' , avg_meters['loss'].avg),('ji' , avg_meters['JI'].avg)])
+      postfix = OrderedDict([('loss' , avg_meters['loss'].avg),('JI' , avg_meters['JI'].avg)])
       pbar.set_postfix(postfix)
       pbar.update(1)
     pbar.close()
 
-  return OrderedDict([('loss', avg_meters['loss'].avg), ('ji', avg_meters['JI'].avg)])
+  return OrderedDict([('loss', avg_meters['loss'].avg), ('JI', avg_meters['JI'].avg)])
 
 
 def main():
@@ -230,7 +231,7 @@ def main():
   )
 
   log = OrderedDict([
-    ('epoch', []), ('loss', []), ('lr', []), ('iou', []), ('valid_loss', []), ('valid_accuracy', [])
+    ('epoch', []), ('loss', []), ('lr', []), ('JI', []), ('val_loss', []), ('val_JI', [])
   ])
 
   best_iou = 0
@@ -249,34 +250,33 @@ def main():
     elif config['scheduler'] == 'ReduceLROnPlateau':
       scheduler.step(val_log['loss'])
 
-    print('loss %.4f - iou %.4f - val_loss %.4f - val_iou %.4f'
-              % (train_log['loss'], train_log['iou'], val_log['loss'], val_log['iou']))
+    print('loss %.4f - JI %.4f - val_loss %.4f - val_JI %.4f'
+              % (train_log['loss'], train_log['JI'], val_log['loss'], val_log['JI']))
 
     log['epoch'].append(epoch)
     log['lr'].append(config['lr'])
     log['loss'].append(train_log['loss'])
-    log['iou'].append(train_log['iou'])
+    log['JI'].append(train_log['JI'])
     log['val_loss'].append(val_log['loss'])
-    log['val_iou'].append(val_log['iou'])
+    log['val_JI'].append(val_log['JI'])
 
     pd.DataFrame(log).to_csv('models/%s/log.csv' %config['name'], index=False)
 
     trigger += 1
 
-    if val_log['iou'] > best_iou:
-      torch.save(model.state_dict(), 'models/%s/model.pth' %config['name'])
-      best_iou = val_log['iou']
+    if val_log['JI'] > best_iou:
+      torch.save(net.state_dict(), 'models/%s/model.pth' %config['name'])
+      best_iou = val_log['JI']
       print("=> saved best model")
       trigger = 0
 
     # early stopping
-    if config['early_stopping'] >= 0 and trigger >= config['early_stopping']:
-      print("=> early stopping")
-      break
+    # if config['early_stopping'] >= 0 and trigger >= config['early_stopping']:
+    #   print("=> early stopping")
+    #   break
 
     torch.cuda.empty_cache()
 
 
 if __name__ == '__main__':
     main()
-    
