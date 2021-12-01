@@ -4,7 +4,30 @@ import torch.nn.functional as F
 import torchvision.transforms.functional as transF
 import numpy as np
 
-__all__ = ['BCEDiceLoss', 'LovaszHingeLoss']
+__all__ = ['BCEDiceLoss', 'BCELoss','LovaszHingeLoss']
+
+class BCELoss(nn.Module):
+    def __init__(self, crop = False, crop_batch = False):
+        super(BCELoss, self).__init__()
+        self.crop = crop
+        self.crop_batch = crop_batch
+    def _crop(self, img, input_shape):
+        h, w = input_shape[0], input_shape[1]
+        dh = int((768-h)/2)
+        dw = int((1024-w)/2)
+        cropped = transF.crop(img, dw, dh, h, w)
+        return cropped
+    def forward(self, predict, target, input_shape, weights):
+        n = predict.size(0)
+        loss = 0
+        for i in range(n):
+            predict_ = self._crop(predict[i], (input_shape[0][i], input_shape[1][i]))
+            target_ = self._crop(target[i], (input_shape[0][i], input_shape[1][i]))
+            weight = weights[i]
+            loss += F.binary_cross_entropy_with_logits(predict_, target_, weight = weight)
+        return loss
+
+
 
 class BCEDiceLoss(nn.Module):
   def __init__(self, crop = False, crop_batch = False):

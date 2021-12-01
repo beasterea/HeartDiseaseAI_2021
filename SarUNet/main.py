@@ -15,6 +15,7 @@ from tqdm import tqdm
 
 from sarunet_model import HeartSarUnet
 from losses import BCEDiceLoss
+from losses import BCELoss
 import sarunet_model
 import losses
 from dataset import HeartDiseaseDataset
@@ -33,13 +34,15 @@ def parse_args():
 
   # name of the model
   parser.add_argument('--name', default = None)
+  parser.add_argument('--all', default = True)
+  parser.add_argument('--img_type', default = 'A2C')
 
   # for the Net
   parser.add_argument('--batch_size', default = 8, type = int)
   parser.add_argument('--input_channels', default = 3, type = int)
   parser.add_argument('--model', metavar = 'MODEL',default = 'UNetPP',choices = MODEL_NAMES,
                       help = 'model architecture : ' + '|'.join(MODEL_NAMES))
-  parser.add_argument('--loss', default = 'BCEDiceLoss', choices = LOSS_NAMES,
+  parser.add_argument('--loss', default = 'BCELoss', choices = LOSS_NAMES,
                       help = 'loss function : ' + '|'.join(LOSS_NAMES))
   parser.add_argument('--num_classes', default = 1, type = int, help = 'num of output channel') # 최종 출력은 1개의 channel로
   parser.add_argument('--threshold', default = 0.5, type = float) # sigmoid를 취해준 값의 임계값
@@ -54,7 +57,7 @@ def parse_args():
   
 
   # optimizer
-  parser.add_argument('--epochs', default = 10, type = int)
+  parser.add_argument('--epochs', default = 20, type = int)
   parser.add_argument('--optimizer', default = 'Adam',
                       choices = ['Adam','SGD'], help = 'optimizers : '+ '|'.join(['Adam', 'SGD']))
   parser.add_argument('--momentum', default = '0.09', type = float)
@@ -81,24 +84,28 @@ def train(net, train_loader, criterion, optimizer, config):
     input = input.cuda()
     target = target.cuda()
     input_shape = info['img_shape']
+    weights = info['weight'].cuda()
 
     output = net(input)
-    loss = criterion(output, target, input_shape)
-    ji = iou_score(output, target, input_shape)
+    if config['loss'] == 'BCELoss':
+      loss = criterion(output, target, input_shape, weights)
+    else:
+      loss = criterion(output, target, input_shape)
+    ji, jac = iou_score(output, target, input_shape)
     
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
 
-    avg_meters['loss'].upadate(loss.item(), input.size(0))
-    avg_meters['JI'].update(ji, input.size(0))
+    avg_meters['loss'].update(loss.item(), input.size(0))
+    avg_meters['JI'].update(jac, input.size(0))
 
-    postfix = OrderedDict([('loss' , avg_meters['loss'].avg),('ji' , avg_meters['JI'].avg)])
+    postfix = OrderedDict([('loss' , avg_meters['loss'].avg),('JI' , avg_meters['JI'].avg)])
     pbar.set_postfix(postfix)
     pbar.update()
   pbar.close()
 
-  return OrderedDict([('loss', avg_meters['loss'].avg), ('ji', avg_meters['JI'].avg)])
+  return OrderedDict([('loss', avg_meters['loss'].avg), ('JI', avg_meters['JI'].avg)])
   
 def validate(net, valid_loader, criterion, config):
   avg_meters = {'loss': AverageMeter(),'JI': AverageMeter()}
@@ -108,32 +115,37 @@ def validate(net, valid_loader, criterion, config):
   with torch.no_grad():
     pbar = tqdm(total=len(valid_loader))
     for input, target, info in valid_loader:
+      weights = info['weight'].cuda()
       input = input.cuda()
       target = target.cuda()
       input_shape = info['img_shape']
 
       output = net(input)
-      loss = criterion(output, target, input_shape)
-      ji = iou_score(output, target, input_shape)
-      
-    
+      if config['loss'] == 'BCELoss':
+        loss = criterion(output, target, input_shape, weights)
+      else:
+        loss = criterion(output, target, input_shape)
+      ji,jac = iou_score(output, target, input_shape)
+      #print(f"loss:{loss} iou : {ji}")
       avg_meters['loss'].update(loss.item(), input.size(0))
-      avg_meters['iou'].update(ji, input.size(0))
+      avg_meters['JI'].update(jac, input.size(0))
 
-      postfix = OrderedDict([('loss' , avg_meters['loss'].avg),('ji' , avg_meters['JI'].avg)])
+      postfix = OrderedDict([('loss' , avg_meters['loss'].avg),('JI' , avg_meters['JI'].avg)])
       pbar.set_postfix(postfix)
       pbar.update(1)
     pbar.close()
 
-  return OrderedDict([('loss', avg_meters['loss'].avg), ('ji', avg_meters['JI'].avg)])
+  return OrderedDict([('loss', avg_meters['loss'].avg), ('JI', avg_meters['JI'].avg)])
 
 
 def main():
   config = vars(parse_args()) # parse_args()라는 training을 위해 설정해 놓은 값들
-
-  criterion = BCEDiceLoss().cuda()
-
+  if config['loss'] == 'BCELoss':
+    criterion = BCELoss(crop = True).cuda()
+  else:
+    criterion = BCEDiceLoss(crop = True).cuda()
   net = HeartSarUnet(config['num_classes'], config['input_channels'])
+  #net.load_state_dict(torch.load('/content/drive/MyDrive/HeartDiseaseAI/CODE_02/models/sarunet01.pth'))
   net = net.cuda()
 
   params = filter(lambda p:p.requires_grad, net.parameters())
@@ -155,6 +167,11 @@ def main():
   train_dirs = glob(os.path.join(config['dataset'], 'train', '*', '*')) # A2C, A4C image 모두 
   valid_dirs = glob(os.path.join(config['dataset'], 'validation', '*', '*'))
 
+  train_img_dirs = list(filter(lambda x: x.split('/')[-1].split('.')[-1] == 'png', train_dirs))
+  train_mask_dirs = list(filter(lambda x: x.split('/')[-1].split('.')[-1] == 'npy', train_dirs))
+  valid_img_dirs = list(filter(lambda x: x.split('/')[-1].split('.')[-1] == 'png', valid_dirs))
+  valid_mask_dirs = list(filter(lambda x: x.split('/')[-1].split('.')[-1] == 'npy', valid_dirs))
+
   train_img_ids = list(set([os.path.splitext(os.path.basename(p))[0] for p in train_dirs]))
   valid_img_ids = list(set([os.path.splitext(os.path.basename(p))[0] for p in valid_dirs]))
 
@@ -167,21 +184,37 @@ def main():
     transforms.Normalize(),
   ])
 
-  train_dataset = HeartDiseaseDataset(
-      img_ids = train_img_ids,
-      img_dir = os.path.join(config['dataset'], 'train', 'A2C'),
-      mask_dir = os.path.join(config['dataset'], 'train', 'A2C'),
+  if config['all'] == True:
+    train_dataset = HeartDiseaseDataset(
+      img_ids = None,
+      img_dir = train_img_dirs,
+      mask_dir = train_mask_dirs,
       num_classes = config['num_classes'],
       transform = train_transform
-  )
-
-  valid_dataset = HeartDiseaseDataset(
-      img_ids = valid_img_ids,
-      img_dir = os.path.join(config['dataset'], 'validation', 'A2C'),
-      mask_dir = os.path.join(config['dataset'], 'validation', 'A2C'),
+    )
+    valid_dataset = HeartDiseaseDataset(
+      img_ids = None,
+      img_dir = valid_img_dirs,
+      mask_dir = valid_mask_dirs,
       num_classes = config['num_classes'],
       transform = valid_transform
-  )
+    )
+  else:
+    train_dataset = HeartDiseaseDataset(
+      img_ids = train_img_ids,
+      img_dir = os.path.join(config['dataset'], 'train', config['img_type']),
+      mask_dir = os.path.join(config['dataset'], 'train', config['img_type']),
+      num_classes = config['num_classes'],
+      transform = train_transform
+    )
+
+    valid_dataset = HeartDiseaseDataset(
+      img_ids = valid_img_ids,
+      img_dir = os.path.join(config['dataset'], 'validation', config['img_type']),
+      mask_dir = os.path.join(config['dataset'], 'validation', config['img_type']),
+      num_classes = config['num_classes'],
+      transform = valid_transform
+    )
 
   train_loader = torch.utils.data.DataLoader(
       train_dataset, batch_size = config['batch_size'],
@@ -215,29 +248,29 @@ def main():
       scheduler.step(val_log['loss'])
 
     print('loss %.4f - iou %.4f - val_loss %.4f - val_iou %.4f'
-              % (train_log['loss'], train_log['iou'], val_log['loss'], val_log['iou']))
+              % (train_log['loss'], train_log['JI'], val_log['loss'], val_log['JI']))
 
     log['epoch'].append(epoch)
     log['lr'].append(config['lr'])
     log['loss'].append(train_log['loss'])
-    log['iou'].append(train_log['iou'])
-    log['val_loss'].append(val_log['loss'])
-    log['val_iou'].append(val_log['iou'])
+    log['iou'].append(train_log['JI'])
+    log['valid_loss'].append(val_log['loss'])
+    log['valid_accuracy'].append(val_log['JI'])
 
-    pd.DataFrame(log).to_csv('models/%s/log.csv' %config['name'], index=False)
+    # pd.DataFrame(log).to_csv('models/%s/log.csv' %config['name'], index=False)
 
     trigger += 1
 
-    if val_log['iou'] > best_iou:
-      torch.save(model.state_dict(), 'models/%s/model.pth' %config['name'])
-      best_iou = val_log['iou']
+    if val_log['JI'] > best_iou:
+      torch.save(net.state_dict(), '/content/drive/MyDrive/HeartDiseaseAI/CODE_02/models/both_sarunetbceloss_01.pth')
+      best_iou = val_log['JI']
       print("=> saved best model")
       trigger = 0
 
     # early stopping
-    if config['early_stopping'] >= 0 and trigger >= config['early_stopping']:
-      print("=> early stopping")
-      break
+    #if config['early_stopping'] >= 0 and trigger >= config['early_stopping']:
+    #  print("=> early stopping")
+    #  break
 
     torch.cuda.empty_cache()
 
