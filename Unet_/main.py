@@ -22,6 +22,10 @@ from utils import AverageMeter, str2bool
 
 import pandas as pd
 
+# for tensorboard
+import torchvision
+from torch.utils.tensorboard import SummaryWriter
+
 MODEL_NAMES = unet_model.__all__
 LOSS_NAMES = losses.__all__
 LOSS_NAMES.append("BCEWithLogitsLoss")
@@ -110,7 +114,7 @@ def train(net, train_loader, criterion, optimizer, config):
 
   return OrderedDict([('loss', avg_meters['loss'].avg), ('JI', avg_meters['JI'].avg)])
 
-def validate(net, valid_loader, criterion, config):
+def validate(net, valid_loader, criterion, config, writer, epoch):
   avg_meters = {'loss': AverageMeter(),'JI': AverageMeter()}
 
   net.eval()
@@ -142,6 +146,17 @@ def validate(net, valid_loader, criterion, config):
       postfix = OrderedDict([('loss' , avg_meters['loss'].avg),('JI' , avg_meters['JI'].avg)])
       pbar.set_postfix(postfix)
       pbar.update(1)
+      
+      # write tensorboard
+      if epoch == 1:
+        writer.add_graph(net, input)
+      
+      grid = torchvision.utils.make_grid(input)
+      writer.add_image('images/input', grid)
+      grid = torchvision.utils.make_grid(output)
+      writer.add_image('images/output', grid)
+      grid = torchvision.utils.make_grid(target)
+      writer.add_image('images/target', grid)
     pbar.close()
 
   return OrderedDict([('loss', avg_meters['loss'].avg), ('JI', avg_meters['JI'].avg)])
@@ -150,6 +165,9 @@ def validate(net, valid_loader, criterion, config):
 def main():
   now = datetime.datetime.now()
   config = vars(parse_args())
+
+  # generate tensorboard writer
+  writer = SummaryWriter('/content/drive/MyDrive/HeartDiseaseAI/runs/my_board')
 
   # 만약에 best iou score을 기록한 모델이 생간다면 해당 모델의 checkpoint를 저장하기 위해 사용할 이름
   if config['name'] is None:
@@ -243,7 +261,7 @@ def main():
     # train for one epoch
     train_log = train(net,train_loader, criterion, optimizer, config)
     # validate for one epoch
-    val_log = validate(net,valid_loader, criterion, config)
+    val_log = validate(net,valid_loader, criterion, config, writer, epoch)
 
     if config['scheduler'] == 'CosineAnnealingLR':
       scheduler.step()
@@ -252,6 +270,12 @@ def main():
 
     print('loss %.4f - JI %.4f - val_loss %.4f - val_JI %.4f'
               % (train_log['loss'], train_log['JI'], val_log['loss'], val_log['JI']))
+
+    # write tensor board
+    writer.add_scalar('loss/train', train_log['loss'], epoch)
+    writer.add_scalar('JI/train', train_log['JI'], epoch)
+    writer.add_scalar('loss/validation', val_log['loss'], epoch)
+    writer.add_scalar('JI/validation', val_log['JI'], epoch)
 
     log['epoch'].append(epoch)
     log['lr'].append(config['lr'])
@@ -276,6 +300,7 @@ def main():
     #   break
 
     torch.cuda.empty_cache()
+  writer.close()
 
 
 if __name__ == '__main__':
