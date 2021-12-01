@@ -12,15 +12,33 @@ def crop_img(img, input_shape):
 
   return cropped
 
-def iou_score(predict, target, input_shape):
+def iou_score(predict, target, input_shape, crop = True):
   smooth = 1e-5
-  predict = crop_img(predict, input_shape)
+  intersection = 0
+  union = 0
+  n = predict.size(0) # batch size
+  if crop:
+    for i in range(n):
+      predict_ = crop_img(predict[i], (input_shape[0][i], input_shape[1][i]))
+      target_ = crop_img(target[i], (input_shape[0][i], input_shape[1][i]))
+      if torch.is_tensor(predict_):
+        predict_ = torch.sigmoid(predict_).data.cpu().numpy()
+      if torch.is_tensor(target_):
+        target_ = target_.data.cpu().numpy()
+      predict_ = predict_ > 0.5
+      target_ = target_ > 0.5
+      
+      intersection += (predict_ & target_).reshape(1, -1).sum(1)
+      union += (predict_ | target_).reshape(1,-1).sum(1)
+    return (intersection + smooth)/ (union+smooth)
+
+
+  #predict = crop_img(predict, input_shape)
 
   if torch.is_tensor(predict):
     predict = torch.sigmoid(predict).data.cpu().numpy()
   if torch.is_tensor(target):
     target = target.data.cpu().numpy()
-  
   predict_ = predict > 0.5
   target_ = target > 0.5
   intersection = (predict_ & target_).sum()
@@ -30,7 +48,7 @@ def iou_score(predict, target, input_shape):
 
 def dice_coef(predict, target, input_shape):
   smooth = 1e-5
-  predict = crop_img(predict, input_shape)
+  #predict = crop_img(predict, input_shape)
 
   predict = torch.sigmoid(predict).view(-1).data.cpu().numpy()
   target = target.view(-1).data.cpu().numpy()
