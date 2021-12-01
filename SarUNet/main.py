@@ -12,7 +12,6 @@ from albumentations.core.composition import Compose
 from torch.optim import lr_scheduler
 from tqdm import tqdm
 
-
 from sarunet_model import HeartSarUnet
 from losses import BCEDiceLoss
 from losses import BCELoss
@@ -23,6 +22,11 @@ from metrics import iou_score
 from utils import AverageMeter, str2bool
 
 import pandas as pd
+
+# for tensorboard
+import torchvision
+from torch.utils.tensorboard import SummaryWriter
+
 
 MODEL_NAMES = sarunet_model.__all__
 LOSS_NAMES = losses.__all__
@@ -107,7 +111,7 @@ def train(net, train_loader, criterion, optimizer, config):
 
   return OrderedDict([('loss', avg_meters['loss'].avg), ('JI', avg_meters['JI'].avg)])
   
-def validate(net, valid_loader, criterion, config):
+def validate(net, valid_loader, criterion, config, writer, epoch):
   avg_meters = {'loss': AverageMeter(),'JI': AverageMeter()}
 
   net.eval()
@@ -133,19 +137,32 @@ def validate(net, valid_loader, criterion, config):
       postfix = OrderedDict([('loss' , avg_meters['loss'].avg),('JI' , avg_meters['JI'].avg)])
       pbar.set_postfix(postfix)
       pbar.update(1)
+
+      # write tensorboard
+      if epoch == 1:
+        writer.add_graph(net, input)
+      
+      grid = torchvision.utils.make_grid(input)
+      writer.add_image('images/input', grid)
+      output = torch.sigmoid(output) > 0.5
+      grid = torchvision.utils.make_grid(output)
+      writer.add_image('images/output', grid)
+      grid = torchvision.utils.make_grid(target)
+      writer.add_image('images/target', grid)
     pbar.close()
 
   return OrderedDict([('loss', avg_meters['loss'].avg), ('JI', avg_meters['JI'].avg)])
 
 
 def main():
+  writer = SummaryWriter('/content/drive/MyDrive/HeartDiseaseAI/runs/my_board')
   config = vars(parse_args()) # parse_args()라는 training을 위해 설정해 놓은 값들
   if config['loss'] == 'BCELoss':
     criterion = BCELoss(crop = True).cuda()
   else:
     criterion = BCEDiceLoss(crop = True).cuda()
   net = HeartSarUnet(config['num_classes'], config['input_channels'])
-  #net.load_state_dict(torch.load('/content/drive/MyDrive/HeartDiseaseAI/CODE_02/models/sarunet01.pth'))
+  #net.load_state_dict(torch.load('/content/drive/MyDrive/HeartDiseaseAI/CODE_02/models/both_sarunetbceloss_01.pth'))
   net = net.cuda()
 
   params = filter(lambda p:p.requires_grad, net.parameters())
@@ -177,12 +194,9 @@ def main():
 
   train_transform = Compose([
     transforms.Flip(),
-    transforms.Normalize(),
   ])
 
-  valid_transform = Compose([
-    transforms.Normalize(),
-  ])
+  valid_transform = None
 
   if config['all'] == True:
     train_dataset = HeartDiseaseDataset(
@@ -240,7 +254,7 @@ def main():
     # train for one epoch
     train_log = train(net,train_loader, criterion, optimizer, config)
     # validate for one epoch
-    val_log = validate(net,valid_loader, criterion, config)
+    val_log = validate(net,valid_loader, criterion, config, writer, epoch)
 
     if config['scheduler'] == 'CosineAnnealingLR':
       scheduler.step()
@@ -262,7 +276,7 @@ def main():
     trigger += 1
 
     if val_log['JI'] > best_iou:
-      torch.save(net.state_dict(), '/content/drive/MyDrive/HeartDiseaseAI/CODE_02/models/both_sarunetbceloss_01.pth')
+      torch.save(net.state_dict(), '/content/drive/MyDrive/HeartDiseaseAI/CODE_02/models/both_sarunetbceloss_02.pth')
       best_iou = val_log['JI']
       print("=> saved best model")
       trigger = 0
@@ -273,6 +287,7 @@ def main():
     #  break
 
     torch.cuda.empty_cache()
+  writer.close()
 
 
 if __name__ == '__main__':

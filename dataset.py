@@ -59,6 +59,7 @@ class HeartDiseaseDataset(torch.utils.data.Dataset):
     img = self._pad_img(img)
     mask = np.expand_dims(mask, axis = -1)
     mask = self._pad_img(mask)
+    #print(mask.shape)
   
 
     if self.transform is not None:
@@ -67,8 +68,9 @@ class HeartDiseaseDataset(torch.utils.data.Dataset):
       mask = transformed['mask']
 
   
-    img = img.astype('float32') / 255 # 0-255사이의 uint8 -> 0-1 사이의 float32
+    img = img.astype('float32')/255 # 0-255사이의 uint8 -> 0-1 사이의 float32
     mask = mask.astype('float32')
+    #print(f"mask : {mask}")
     if len(img.shape) == 2:
       img = img.expand_dims(img, axis = -1)
     img = img.transpose(2, 0, 1) # (3, 434, 636) 또는 (3, 600, 800)
