@@ -36,6 +36,8 @@ def parse_args():
 
   # name of the model
   parser.add_argument('--name', default = None)
+  parser.add_argument('--all', default = True)
+  parser.add_argument('--img_type', default = 'A2C')
 
   # for the Net
   parser.add_argument('--batch_size', default = 8, type = int)
@@ -93,19 +95,19 @@ def train(net, train_loader, criterion, optimizer, config):
       for output in outputs:
         loss += criterion(output, target, input_shape)
       loss /= len(outputs)
-      ji = iou_score(outputs[-1], target, input_shape)
+      ji,jac = iou_score(outputs[-1], target, input_shape)
     
     else:
       output = net(input)
       loss = criterion(output, target, input_shape)
-      ji = iou_score(output, target, input_shape)
+      ji, jac = iou_score(output, target, input_shape)
     
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
 
     avg_meters['loss'].update(loss.item(), input.size(0))
-    avg_meters['JI'].update(ji, input.size(0))
+    avg_meters['JI'].update(jac, input.size(0))
 
     postfix = OrderedDict([('loss' , avg_meters['loss'].avg),('JI' , avg_meters['JI'].avg)])
     pbar.set_postfix(postfix)
@@ -133,15 +135,15 @@ def validate(net, valid_loader, criterion, config, writer, epoch):
         for output in outputs:
           loss += criterion(output, target, input_shape)
         loss /= len(outputs)
-        ji = iou_score(outputs[-1], target, input_shape)
+        ji, jac = iou_score(outputs[-1], target, input_shape)
       
       else:
         output = net(input)
         loss = criterion(output, target, input_shape)
-        ji = iou_score(output, target, input_shape)
+        ji, jac = iou_score(output, target, input_shape)
     
       avg_meters['loss'].update(loss.item(), input.size(0))
-      avg_meters['JI'].update(ji, input.size(0))
+      avg_meters['JI'].update(jac, input.size(0))
 
       postfix = OrderedDict([('loss' , avg_meters['loss'].avg),('JI' , avg_meters['JI'].avg)])
       pbar.set_postfix(postfix)
@@ -209,6 +211,11 @@ def main():
   train_dirs = glob(os.path.join(config['dataset'], 'train', '*', '*')) # A2C, A4C image 모두 
   valid_dirs = glob(os.path.join(config['dataset'], 'validation', '*', '*'))
 
+  train_img_dirs = list(filter(lambda x: x.split('/')[-1].split('.')[-1] == 'png', train_dirs))
+  train_mask_dirs = list(filter(lambda x: x.split('/')[-1].split('.')[-1] == 'npy', train_dirs))
+  valid_img_dirs = list(filter(lambda x: x.split('/')[-1].split('.')[-1] == 'png', valid_dirs))
+  valid_mask_dirs = list(filter(lambda x: x.split('/')[-1].split('.')[-1] == 'npy', valid_dirs))
+
   train_img_ids = list(set([os.path.splitext(os.path.basename(p))[0] for p in train_dirs]))
   valid_img_ids = list(set([os.path.splitext(os.path.basename(p))[0] for p in valid_dirs]))
 
@@ -221,21 +228,38 @@ def main():
     transforms.Normalize(),
   ])
 
-  train_dataset = HeartDiseaseDataset(
-      img_ids = train_img_ids,
-      img_dir = os.path.join(config['dataset'], 'train', 'A2C'),
-      mask_dir = os.path.join(config['dataset'], 'train', 'A2C'),
+  if config['all'] == True:
+    train_dataset = HeartDiseaseDataset(
+      img_ids = None,
+      img_dir = train_img_dirs,
+      mask_dir = train_mask_dirs,
       num_classes = config['num_classes'],
       transform = train_transform
-  )
-
-  valid_dataset = HeartDiseaseDataset(
-      img_ids = valid_img_ids,
-      img_dir = os.path.join(config['dataset'], 'validation', 'A2C'),
-      mask_dir = os.path.join(config['dataset'], 'validation', 'A2C'),
+    )
+    valid_dataset = HeartDiseaseDataset(
+      img_ids = None,
+      img_dir = valid_img_dirs,
+      mask_dir = valid_mask_dirs,
       num_classes = config['num_classes'],
       transform = valid_transform
-  )
+    )
+  else:
+    train_dataset = HeartDiseaseDataset(
+      img_ids = train_img_ids,
+      img_dir = os.path.join(config['dataset'], 'train', config['img_type']),
+      mask_dir = os.path.join(config['dataset'], 'train', config['img_type']),
+      num_classes = config['num_classes'],
+      transform = train_transform
+    )
+
+    valid_dataset = HeartDiseaseDataset(
+      img_ids = valid_img_ids,
+      img_dir = os.path.join(config['dataset'], 'validation', config['img_type']),
+      mask_dir = os.path.join(config['dataset'], 'validation', config['img_type']),
+      num_classes = config['num_classes'],
+      transform = valid_transform
+    )
+
 
   train_loader = torch.utils.data.DataLoader(
       train_dataset, batch_size = config['batch_size'],
