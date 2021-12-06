@@ -14,7 +14,7 @@ from utils import AverageMeter
 from SarUNet.model import HeartSarUnet
 
 
-MODEL_CKPT = '/content/drive/MyDrive/HeartDiseaseAI/src/crop_sarunet_sigmoid_noflip_bce01.pth'
+MODEL_CKPT = ''
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -35,9 +35,14 @@ def parse_args():
 
 def main():
     config = vars(parse_args())
+    if config['image_type'] == 'A2C':
+        MODEL_CKPT = os.path.join(os.getcwd(), 'crop_sarunet_A2C_bce01.pth')
+    else:
+        MODEL_CKPT = os.path.join(os.getcwd(), 'sarunet_A4C.pth')
 
     # create model
     net = HeartSarUnet(config['num_classes'], config['input_channels'], config['channel_in_start'])
+
     net.load_state_dict(torch.load(MODEL_CKPT))
     net = net.cuda()
     net.eval()
