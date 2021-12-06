@@ -110,7 +110,10 @@ class HeartDiseaseDataset(torch.utils.data.Dataset):
     shape = img.shape
     for i in range(shape[0]):
       if (img[i][0] != 0):
-        img[i, :] = 0
+        if img[i][0] == 1:
+          break
+        else:
+          img[i, :] = 0
       else:
         break
     return img
@@ -175,11 +178,26 @@ class HeartDiseaseDataset(torch.utils.data.Dataset):
 
     from albumentations.augmentations import transforms
     from albumentations.core.composition import Compose
-    img_transform = Compose([transforms.Normalize(mean = 48, std = 38, max_pixel_value = 1.0)])
+    """
+    normalization
+    #img_transform = Compose([transforms.Normalize(mean = 48, std = 38, max_pixel_value = 255.0)])
+    img_transform = Compose([transforms.Normalize()])
     normed_img = img_transform(image = img, mask = mask)['image']
+    """
+    """
+    transforms
+    img_transform = Conpose(OneOf([
+      transforms.ShiftScaleRotate(),
+      transforms.GaussNoise()
+    ]))
+    img = img_transform(image = img, mask = mask)['image']
+    """
   
-  
-    img = normed_img.astype('float32') # 0-255사이의 uint8 -> 0-1 사이의 float32
+    #img = normed_img.astype('float32')/255# 0-255사이의 uint8 -> 0-1 사이의 float32
+    if np.max(img) > 1.0:
+      img = img.astype('float32')/255
+    else:
+      img = img.astype('float32')
     mask = mask.astype('float32')
     #print(f"mask : {mask}")
     if len(img.shape) == 2:

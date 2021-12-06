@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 from albumentations.augmentations import transforms
+import albumentations as A
 from albumentations.core.composition import Compose
 from torch.optim import lr_scheduler
 from tqdm import tqdm
@@ -18,8 +19,8 @@ from losses import BCELoss
 import sarunet_model
 import losses
 from dataset import HeartDiseaseDataset
-from metrics import iou_score
-from utils import AverageMeter, str2bool
+from metrics import iou_score, crop_img
+from utils import AverageMeter, str2bool, visualize
 
 import pandas as pd
 
@@ -35,13 +36,21 @@ LOSS_NAMES.append("BCEWithLogitsLoss")
 def parse_args():
   parser = argparse.ArgumentParser()
   parser.add_argument('--dataset',default = '/content/drive/MyDrive/HeartDiseaseAI/DATA', help = 'Base directory of the dataset')
-
+  parser.add_argument('--pad', default = True)
+  parser.add_argument('--transform', default = True)
   # name of the model
   parser.add_argument('--name', default = None)
   parser.add_argument('--all', default = True)
   parser.add_argument('--img_type', default = 'A2C')
+  parser.add_argument('--normalize', default = True)
 
   # for the Net
+  parser.add_argument('--sigmoid', default = False)
+  parser.add_argument('--softmax', default = True)
+  parser.add_argument('--input_size', default = 128, type = int)
+  parser.add_argument('--input_h',default = 128, type = int)
+  parser.add_argument('--input_w', default = 128, type = int)
+  parser.add_argument('--channel_in_start', default = 12, type = int)
   parser.add_argument('--batch_size', default = 8, type = int)
   parser.add_argument('--input_channels', default = 3, type = int)
   parser.add_argument('--model', metavar = 'MODEL',default = 'UNetPP',choices = MODEL_NAMES,
@@ -51,7 +60,7 @@ def parse_args():
   parser.add_argument('--num_classes', default = 1, type = int, help = 'num of output channel') # 최종 출력은 1개의 channel로
   parser.add_argument('--threshold', default = 0.5, type = float) # sigmoid를 취해준 값의 임계값
   parser.add_argument('--input_channel_num', default = 4, type = int) # input channel의 개수
-  parser.add_argument('--lr', default = 1e-3, type = float, metavar = 'LR', help = 'learning rate') # 계속 변화를 줘야 하는 학습률
+  parser.add_argument('--lr', default = 3e-4, type = float, metavar = 'LR', help = 'learning rate') # 계속 변화를 줘야 하는 학습률
 
   # scheduler for learning rate
   parser.add_argument('--scheduler', default = 'CosineAnnealingLR',
@@ -70,7 +79,7 @@ def parse_args():
 
   return config
 
-def train(net, train_loader, criterion, optimizer, config):
+def train(net, train_loader, criterion, optimizer, config, writer, epoch):
   """
   net : Net object for the task
   criterion : loss function
@@ -92,10 +101,15 @@ def train(net, train_loader, criterion, optimizer, config):
 
     output = net(input)
     if config['loss'] == 'BCELoss':
-      loss = criterion(output, target, input_shape, weights)
+      loss = criterion(output, target, input_shape, weights,)
+    elif config['loss'] == 'BCEWithLogitsLoss':
+      loss = criterion(output, target, weight = weights)
     else:
-      loss = criterion(output, target, input_shape)
-    ji, jac = iou_score(output, target, input_shape)
+      loss = criterion(output, target, input_shape, weights = weights)
+    if config['softmax'] == True:
+        ji, jac  = iou_score(output, target, input_shape, crop = config['pad'], softmax = True)
+    else:
+      ji,jac = iou_score(output, target, input_shape, crop = config['pad'], softmax = config['softmax'])
     
     optimizer.zero_grad()
     loss.backward()
@@ -106,7 +120,36 @@ def train(net, train_loader, criterion, optimizer, config):
 
     postfix = OrderedDict([('loss' , avg_meters['loss'].avg),('JI' , avg_meters['JI'].avg)])
     pbar.set_postfix(postfix)
-    pbar.update()
+    pbar.update(1)
+    # write tensorboard
+    if epoch == 1:
+      writer.add_graph(net, input)
+  
+
+    grid = torchvision.utils.make_grid(input[0])
+    writer.add_image('images/input', grid, epoch)
+    if config['softmax'] == True:
+      output = torch.softmax(output[0], dim = 0)
+      output = torch.argmax(output, axis = 0, keepdim = True).float()
+
+    elif config['sigmoid'] == True or config['sigmoid'] == 'True':
+      output = output[0] > 0.5
+    
+    else:
+      output = torch.sigmoid(output[0]) > 0.5
+    if config['pad'] == 'True':
+      output = crop_img(output, input_shape = (input_shape[0][0], input_shape[1][0]))
+      grid = torchvision.utils.make_grid(output)
+      writer.add_image('images/output', grid,epoch)
+      target = crop_img(target[0],input_shape = (input_shape[0][0], input_shape[1][0]))
+      grid = torchvision.utils.make_grid(target)
+      writer.add_image('images/target', grid,epoch)
+    else:
+      grid = torchvision.utils.make_grid(output)
+      writer.add_image('images/output', grid,epoch)
+      grid = torchvision.utils.make_grid(target[0])
+      writer.add_image('images/target', grid,epoch)
+
   pbar.close()
 
   return OrderedDict([('loss', avg_meters['loss'].avg), ('JI', avg_meters['JI'].avg)])
@@ -126,10 +169,15 @@ def validate(net, valid_loader, criterion, config, writer, epoch):
 
       output = net(input)
       if config['loss'] == 'BCELoss':
-        loss = criterion(output, target, input_shape, weights)
+        loss = criterion(output, target, input_shape, weights,)
+      elif config['loss'] == 'BCEWithLogitsLoss':
+        loss = criterion(output, target, weight = weights)
       else:
-        loss = criterion(output, target, input_shape)
-      ji,jac = iou_score(output, target, input_shape)
+        loss = criterion(output, target, input_shape, weights)
+      if config['softmax'] == True:
+        ji, jac  = iou_score(output, target, input_shape, crop = config['pad'], softmax = True)
+      else:
+        ji,jac = iou_score(output, target, input_shape, crop = config['pad'], softmax = config['softmax'])
       #print(f"loss:{loss} iou : {ji}")
       avg_meters['loss'].update(loss.item(), input.size(0))
       avg_meters['JI'].update(jac, input.size(0))
@@ -142,14 +190,29 @@ def validate(net, valid_loader, criterion, config, writer, epoch):
       if epoch == 1:
         writer.add_graph(net, input)
       
-      grid = torchvision.utils.make_grid(input)
-      writer.add_image('images/input', grid)
-      output = torch.sigmoid(output) > 0.5
-      grid = torchvision.utils.make_grid(output)
-      writer.add_image('images/output', grid)
-      grid = torchvision.utils.make_grid(target)
-      writer.add_image('images/target', grid)
-    pbar.close()
+      grid = torchvision.utils.make_grid(input[0])
+      writer.add_image('images/input', grid, epoch)
+      if config['softmax'] == True:
+        output = torch.softmax(output[0], dim = 0)
+        output = torch.argmax(output, axis = 0, keepdim = True).float()
+      elif config['sigmoid'] == True or config['sigmoid'] == 'True':
+        output = output[0] > 0.5
+      else:
+        output = torch.sigmoid(output[0]) > 0.5
+
+      if config['pad'] == 'True':
+        output = crop_img(output, input_shape = (input_shape[0][0], input_shape[1][0]))
+        grid = torchvision.utils.make_grid(output)
+        writer.add_image('images/output', grid,epoch)
+        target = crop_img(target[0],input_shape = (input_shape[0][0], input_shape[1][0]))
+        grid = torchvision.utils.make_grid(target)
+        writer.add_image('images/target', grid,epoch)
+      else:
+        grid = torchvision.utils.make_grid(output)
+        writer.add_image('images/output', grid,epoch)
+        grid = torchvision.utils.make_grid(target[0])
+        writer.add_image('images/target', grid,epoch)
+  pbar.close()
 
   return OrderedDict([('loss', avg_meters['loss'].avg), ('JI', avg_meters['JI'].avg)])
 
@@ -158,11 +221,17 @@ def main():
   writer = SummaryWriter('/content/drive/MyDrive/HeartDiseaseAI/runs/my_board')
   config = vars(parse_args()) # parse_args()라는 training을 위해 설정해 놓은 값들
   if config['loss'] == 'BCELoss':
-    criterion = BCELoss(crop = True).cuda()
+    criterion = BCELoss(crop = config['pad'], softmax = config['softmax']).cuda()
+  elif config['loss'] == 'BCEWithLogitsLoss':
+    criterion = nn.BCEWithLogitsLoss().cuda()
   else:
-    criterion = BCEDiceLoss(crop = True).cuda()
-  net = HeartSarUnet(config['num_classes'], config['input_channels'])
-  #net.load_state_dict(torch.load('/content/drive/MyDrive/HeartDiseaseAI/CODE_02/models/both_sarunetbceloss_01.pth'))
+    criterion = BCEDiceLoss(crop = config['pad']).cuda()
+  net = HeartSarUnet(config['num_classes'], config['input_channels'], config['channel_in_start'])
+  #net.load_state_dict(torch.load('/content/drive/MyDrive/HeartDiseaseAI/CODE_02/models/crop_sarunet_transform_bce01.pth')) # with softmax and more transform
+  #net.load_state_dict(torch.load('/content/drive/MyDrive/HeartDiseaseAI/CODE_02/models/crop_sarunet_A2C_bce01.pth')) # A2C
+  net.load_state_dict(torch.load('/content/drive/MyDrive/HeartDiseaseAI/CODE_02/models/crop_sarunet_sigmoid_bce01.pth')) # normalize
+  #net.load_state_dict(torch.load('/content/drive/MyDrive/HeartDiseaseAI/CODE_02/models/crop_sarunet_A4C_bce01.pth')) # A4C
+  
   net = net.cuda()
 
   params = filter(lambda p:p.requires_grad, net.parameters())
@@ -180,56 +249,72 @@ def main():
   elif config['scheduler'] == 'ConstantLR':
     scheduler = None
 
+  if config['all'] == True:
+    train_dirs = sorted(glob(os.path.join(config['dataset'], 'train', '*', '*'))) # A2C, A4C image 모두 
+    valid_dirs = sorted(glob(os.path.join(config['dataset'], 'validation', '*', '*')))
+  elif config['img_type'] == 'A2C':
+    train_dirs = sorted(glob(os.path.join(config['dataset'], 'train', 'A2C', '*'))) # A2C
+    valid_dirs = sorted(glob(os.path.join(config['dataset'], 'validation', 'A2C', '*'))) 
+  else:
+    train_dirs = sorted(glob(os.path.join(config['dataset'], 'train', 'A4C', '*'))) # A2C
+    valid_dirs = sorted(glob(os.path.join(config['dataset'], 'validation', 'A4C', '*'))) 
 
-  train_dirs = glob(os.path.join(config['dataset'], 'train', '*', '*')) # A2C, A4C image 모두 
-  valid_dirs = glob(os.path.join(config['dataset'], 'validation', '*', '*'))
 
-  train_img_dirs = list(filter(lambda x: x.split('/')[-1].split('.')[-1] == 'png', train_dirs))
-  train_mask_dirs = list(filter(lambda x: x.split('/')[-1].split('.')[-1] == 'npy', train_dirs))
-  valid_img_dirs = list(filter(lambda x: x.split('/')[-1].split('.')[-1] == 'png', valid_dirs))
-  valid_mask_dirs = list(filter(lambda x: x.split('/')[-1].split('.')[-1] == 'npy', valid_dirs))
+
+  train_img_dirs = sorted(list(filter(lambda x: x.split('/')[-1].split('.')[-1] == 'png', train_dirs)))
+  train_mask_dirs = sorted(list(filter(lambda x: x.split('/')[-1].split('.')[-1] == 'npy', train_dirs)))
+  valid_img_dirs = sorted(list(filter(lambda x: x.split('/')[-1].split('.')[-1] == 'png', valid_dirs)))
+  valid_mask_dirs = sorted(list(filter(lambda x: x.split('/')[-1].split('.')[-1] == 'npy', valid_dirs)))
 
   train_img_ids = list(set([os.path.splitext(os.path.basename(p))[0] for p in train_dirs]))
   valid_img_ids = list(set([os.path.splitext(os.path.basename(p))[0] for p in valid_dirs]))
 
-  train_transform = Compose([
-    transforms.Flip(),
-  ])
+  if config['normalize'] == True:
+    train_transform = Compose([
+      transforms.HorizontalFlip(p = 0.5),
+      transforms.VerticalFlip(p = 0.5),
+      A.Rotate(limit = 180),
+      A.Normalize(mean = 0.0,std = 1.0, max_pixel_value = 255.0),
+    ])
 
-  valid_transform = None
+    valid_transform = Compose([
+      A.Normalize(mean = 0.0, std = 1.0, max_pixel_value = 255.0),
+    ])
 
-  if config['all'] == True:
-    train_dataset = HeartDiseaseDataset(
+
+  elif config['transform'] == True:
+    train_transform = Compose([
+      transforms.HorizontalFlip(p = 0.5),
+      transforms.VerticalFlip(p = 0.5),
+      A.Rotate(limit = 180),
+    ])
+
+    valid_transform = None
+  
+  else:
+    train_transform = Compose([
+      transforms.HorizontalFlip(p = 0.3),
+    ])
+
+    valid_transform = None
+
+  train_dataset = HeartDiseaseDataset(
       img_ids = None,
       img_dir = train_img_dirs,
       mask_dir = train_mask_dirs,
       num_classes = config['num_classes'],
+      pad = config['pad'],
       transform = train_transform
     )
-    valid_dataset = HeartDiseaseDataset(
+  valid_dataset = HeartDiseaseDataset(
       img_ids = None,
       img_dir = valid_img_dirs,
       mask_dir = valid_mask_dirs,
       num_classes = config['num_classes'],
+      pad = config['pad'],
       transform = valid_transform
     )
-  else:
-    train_dataset = HeartDiseaseDataset(
-      img_ids = train_img_ids,
-      img_dir = os.path.join(config['dataset'], 'train', config['img_type']),
-      mask_dir = os.path.join(config['dataset'], 'train', config['img_type']),
-      num_classes = config['num_classes'],
-      transform = train_transform
-    )
-
-    valid_dataset = HeartDiseaseDataset(
-      img_ids = valid_img_ids,
-      img_dir = os.path.join(config['dataset'], 'validation', config['img_type']),
-      mask_dir = os.path.join(config['dataset'], 'validation', config['img_type']),
-      num_classes = config['num_classes'],
-      transform = valid_transform
-    )
-
+ 
   train_loader = torch.utils.data.DataLoader(
       train_dataset, batch_size = config['batch_size'],
       shuffle = True,
@@ -252,7 +337,7 @@ def main():
     print(f"Epoch {epoch} / {config['epochs']}")
 
     # train for one epoch
-    train_log = train(net,train_loader, criterion, optimizer, config)
+    train_log = train(net,train_loader, criterion, optimizer, config, writer, epoch)
     # validate for one epoch
     val_log = validate(net,valid_loader, criterion, config, writer, epoch)
 
@@ -276,16 +361,22 @@ def main():
     trigger += 1
 
     if val_log['JI'] > best_iou:
-      torch.save(net.state_dict(), '/content/drive/MyDrive/HeartDiseaseAI/CODE_02/models/both_sarunetbceloss_02.pth')
+      #torch.save(net.state_dict(), '/content/drive/MyDrive/HeartDiseaseAI/CODE_02/models/crop_sarunet_transform_bce01.pth')
+      #torch.save(net.state_dict(), '/content/drive/MyDrive/HeartDiseaseAI/CODE_02/models/crop_sarunet_A2C_bce01.pth')
+      torch.save(net.state_dict(), '/content/drive/MyDrive/HeartDiseaseAI/CODE_02/models/crop_sarunet_sigmoid_bce01.pth')
+      #torch.save(net.state_dict(), '/content/drive/MyDrive/HeartDiseaseAI/CODE_02/models/crop_sarunet_A4C_bce01.pth')
+      
       best_iou = val_log['JI']
       print("=> saved best model")
       trigger = 0
 
     # early stopping
-    #if config['early_stopping'] >= 0 and trigger >= config['early_stopping']:
-    #  print("=> early stopping")
-    #  break
-
+    """
+    if config['patience'] >= 0 and trigger >= config['patience']:
+      print("=> early stopping")
+      break
+    """
+    
     torch.cuda.empty_cache()
   writer.close()
 

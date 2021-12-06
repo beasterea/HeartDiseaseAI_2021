@@ -8,10 +8,13 @@ import numpy as np
 __all__ = ['BCEDiceLoss', 'BCELoss','LovaszHingeLoss']
 
 class BCELoss(nn.Module):
-    def __init__(self, crop = False, crop_batch = False):
+    def __init__(self, crop = True, crop_batch = False, sigmoid = False, softmax = True):
         super(BCELoss, self).__init__()
         self.crop = crop
         self.crop_batch = crop_batch
+        self.sigmoid = sigmoid
+        self.softmax = softmax
+
     def _crop(self, img, input_shape):
         h, w = input_shape[0], input_shape[1]
         dh = int((768-h)/2)
@@ -21,19 +24,37 @@ class BCELoss(nn.Module):
     def forward(self, predict, target, input_shape, weights):
         n = predict.size(0)
         loss = 0
-        for i in range(n):
-            predict_ = self._crop(predict[i], (input_shape[0][i], input_shape[1][i]))
+        if self.crop == 'True' or self.crop == True:
+          for i in range(n):
+            if self.softmax == True:
+              predict_ = self._crop(torch.softmax(predict[i], dim = 0), (input_shape[0][i], input_shape[1][i]))
+            else:
+              predict_ = self._crop(predict[i], (input_shape[0][i], input_shape[1][i]))
+           # predict_ = torch.argmax(predict_, axis = 0, keepdim = True).float()
             target_ = self._crop(target[i], (input_shape[0][i], input_shape[1][i]))
             weight = weights[i]
             #print(f"weight : {weight}")
-            loss += F.binary_cross_entropy_with_logits(predict_, target_, weight = weight)
+            if self.softmax == True:
+              loss += F.binary_cross_entropy(torch.unsqueeze(predict_[1,:,:],dim = 0), target_, weights[i])
+
+            elif self.sigmoid == 'True' or self.sigmoid == True:
+              loss += F.binary_cross_entropy(predict_, target_)
+      
+            else:
+              loss += F.binary_cross_entropy_with_logits(predict_, target_, weights[i])
+        else:
+          if self.sigmoid == 'True' or self.sigmoid == True:
+            loss = F.binary_cross_entropy(predict, target)
+          else:
+            loss = F.binary_cross_entropy(torch.softmax(predict, dim = 0), target)
         return loss
 
 class BCEDiceLoss(nn.Module):
-  def __init__(self, crop = False, crop_batch = False):
+  def __init__(self, softmax, crop = True, crop_batch = False):
     super(BCEDiceLoss, self).__init__()
     self.crop = crop
     self.crop_batch = crop_batch
+    self.softmax = softmax
   
   def _crop_single(self, img, input_shape):
     h, w = input_shape[0], input_shape[1]
@@ -58,7 +79,7 @@ class BCEDiceLoss(nn.Module):
         
       return cropped
 
-  def forward(self, x, target, input_shape):
+  def forward(self, x, target, input_shape, weights):
     """
     bce = 0
     for i in range(len(x)):
@@ -70,6 +91,26 @@ class BCEDiceLoss(nn.Module):
     n = x.size(0)
     loss = 0
     if self.crop:
+      if self.softmax == True:
+        bce = 0
+        intersection, sum_x, sum_target = 0,0,0
+        smooth = 1e-5
+        for i in range(n):
+          x_, target_ = self._crop_single(torch.softmax(x[i], dim = 0), (input_shape[0][i], input_shape[1][i])),self._crop_single(target[i], (input_shape[0][i], input_shape[1][i]))
+          #print(f"shape of x : {x_.shape} shape of target : {target_.shape}")
+          x_ = torch.unsqueeze(x_, axis = 0)
+          bce += F.binary_cross_entropy(x_, target_, weights[i])
+          #print(f"bce : {bce}")
+          x_ = x_.reshape(1, -1)
+          target_ = target_.reshape(1, -1)
+          intersection += (x_ * target_).sum(1)
+          sum_x += x_.sum(1)
+          sum_target += target_.sum(1)
+        dice = (intersection * 2 + smooth) / (sum_x + sum_target + smooth)
+        #print(f"dice : {dice}")
+        dice = (1-dice)/n
+        loss = 0.5*bce + dice
+        return loss
       if self.crop_batch:
         x = self._crop_batch(x, input_shape)
         target = self._crop_batch(target, input_shape)
