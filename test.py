@@ -14,7 +14,7 @@ from utils import AverageMeter
 from SarUNet.model import HeartSarUnet
 
 
-MODEL_CKPT = os.curdir
+MODEL_CKPT = '/content/drive/MyDrive/HeartDiseaseAI/src/crop_sarunet_sigmoid_noflip_bce01.pth'
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -34,7 +34,7 @@ def parse_args():
     return args
 
 def main():
-    config = parse_args()
+    config = vars(parse_args())
 
     # create model
     net = HeartSarUnet(config['num_classes'], config['input_channels'], config['channel_in_start'])
@@ -43,10 +43,9 @@ def main():
     net.eval()
 
     # load data
-    test_dirs = sorted(os.path.join(config['data_path'], config['data_type'], config['image_type'], '*'))
-    test_img_dirs = sorted(list(filter(lambda x : x.split('/')[-1] == 'png', test_dirs)))
-    test_mask_dirs = sorted(list(filter(lambda x : x.split('/')[-1] == 'npy', test_dirs)))
-
+    test_dirs = sorted(glob(os.path.join(config['data_path'], config['data_type'], config['image_type'], '*')))
+    test_img_dirs = sorted(list(filter(lambda x: x.split('/')[-1].split('.')[-1] == 'png', test_dirs)))
+    test_mask_dirs = sorted(list(filter(lambda x: x.split('/')[-1].split('.')[-1] == 'npy', test_dirs)))
    
     test_dataset = HeartDiseaseDataset(
         img_ids = None,
@@ -61,7 +60,6 @@ def main():
         batch_size = 1,
         shuffle = False,
     )
-
     avg_meter = {'iou' : AverageMeter(), 'dice':AverageMeter()}
 
     with torch.no_grad():
@@ -79,12 +77,12 @@ def main():
             avg_meter['dice'].update(dice, input.size(0))
             output = torch.sigmoid(output).cpu().numpy()
 
-            img_id = list([os.path.splittext(os.path.basename(p))[0] for p in test_img_dirs])
+            img_id = list([os.path.splitext(os.path.basename(p))[0] for p in test_img_dirs])
 
             for i in range(len(output)):
-                cv2.imwrite(os.path.join(config['dataset'], config['img_type'], img_id[i] + '.png'), 
+                cv2.imwrite(os.path.join(config['data_type'], config['image_type'], img_id[i] + '.png'), 
                 (output[i]>0.5).astype('uint8'))
-    print('IoU : %.4f  Dice : %.4f' %avg_meter['iou'].avg %avg_meter['dice'].avg)
+    print('JI : %.4f  Dice : %.4f' %(avg_meter['iou'].avg, avg_meter['dice'].avg))
 
     torch.cuda.empty_cache()
 
