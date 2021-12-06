@@ -19,6 +19,8 @@ conda install pytorch torchvision
 3. Install requirements
 ```
 pip install -r requirements.txt
+```
+```
 current working directory
 |__test.py
 |__model.py
