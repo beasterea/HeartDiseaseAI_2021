@@ -14,6 +14,7 @@ conda activate <enviornment_name>
 2. Install PyTorch
 ```
 conda install pytorch torchvision 
+```
 
 3. Install requirements
 ```
