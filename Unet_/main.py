@@ -9,6 +9,7 @@ import torch.optim as optim
 
 from albumentations.augmentations import transforms
 from albumentations.core.composition import Compose
+import albumentations as A
 from torch.optim import lr_scheduler
 from tqdm import tqdm
 
@@ -37,7 +38,7 @@ def parse_args():
   # name of the model
   parser.add_argument('--name', default = None)
   parser.add_argument('--all', default = True)
-  parser.add_argument('--img_type', default = 'A2C')
+  parser.add_argument('--img_type', default = '*')
 
   # for the Net
   parser.add_argument('--batch_size', default = 8, type = int)
@@ -45,10 +46,10 @@ def parse_args():
                       help = 'model architecture : ' + '|'.join(MODEL_NAMES))
   parser.add_argument('--loss', default = 'BCEDiceLoss', choices = LOSS_NAMES,
                       help = 'loss function : ' + '|'.join(LOSS_NAMES))
-  parser.add_argument('--deep_supervision', default = True, type = str2bool)
+  parser.add_argument('--deep_supervision', default = False, type = str2bool)
   parser.add_argument('--num_classes', default = 1, type = int, help = 'num of output channel')
   parser.add_argument('--threshold', default = 0.5, type = float)
-  parser.add_argument('--input_channels', default = 3, type = int)
+  parser.add_argument('--input_channels', default = 1, type = int)
   parser.add_argument('--lr', default = 1e-3, type = float, metavar = 'LR', help = 'learning rate')
   parser.add_argument('--start_filter', default = 32, type = int)
 
@@ -66,11 +67,12 @@ def parse_args():
   parser.add_argument('--momentum', default = '0.09', type = float)
   parser.add_argument('--weight_decay', default = 1e-4, type = float)
 
+  parser.add_argument('--rotate', default = False, type = str2bool)
   config = parser.parse_args()
 
   return config
 
-def train(net, train_loader, criterion, optimizer, config):
+def train(net, train_loader, criterion, optimizer, config, writer, epoch):
   """
   net : Net object for the task
   criterion : loss function
@@ -95,19 +97,27 @@ def train(net, train_loader, criterion, optimizer, config):
       for output in outputs:
         loss += criterion(output, target, input_shape)
       loss /= len(outputs)
-      ji,jac = iou_score(outputs[-1], target, input_shape)
+      ji = iou_score(outputs[-1], target, input_shape)
     
     else:
       output = net(input)
       loss = criterion(output, target, input_shape)
-      ji, jac = iou_score(output, target, input_shape)
+      ji = iou_score(output, target, input_shape)
+
+    grid = torchvision.utils.make_grid(input[0])
+    writer.add_image('train/'+str(epoch), grid, 0)
+    grid = torch.sigmoid(output[0]) > 0.5
+    grid = torchvision.utils.make_grid(grid)
+    writer.add_image('train/'+str(epoch), grid, 1)
+    grid = torchvision.utils.make_grid(target[0])
+    writer.add_image('train/'+str(epoch), grid, 2)
     
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
 
     avg_meters['loss'].update(loss.item(), input.size(0))
-    avg_meters['JI'].update(jac, input.size(0))
+    avg_meters['JI'].update(ji, input.size(0))
 
     postfix = OrderedDict([('loss' , avg_meters['loss'].avg),('JI' , avg_meters['JI'].avg)])
     pbar.set_postfix(postfix)
@@ -118,7 +128,7 @@ def train(net, train_loader, criterion, optimizer, config):
 
 def validate(net, valid_loader, criterion, config, writer, epoch):
   avg_meters = {'loss': AverageMeter(),'JI': AverageMeter()}
-
+  model_wirte = 0
   net.eval()
 
   with torch.no_grad():
@@ -127,7 +137,6 @@ def validate(net, valid_loader, criterion, config, writer, epoch):
       input = input.cuda()
       target = target.cuda()
       input_shape = info['img_shape']
-
           
       if config['deep_supervision']:
         outputs = net(input)
@@ -135,30 +144,30 @@ def validate(net, valid_loader, criterion, config, writer, epoch):
         for output in outputs:
           loss += criterion(output, target, input_shape)
         loss /= len(outputs)
-        ji, jac = iou_score(outputs[-1], target, input_shape)
+        ji = iou_score(outputs[-1], target, input_shape)
       
       else:
         output = net(input)
         loss = criterion(output, target, input_shape)
-        ji, jac = iou_score(output, target, input_shape)
+        ji = iou_score(output, target, input_shape)
     
       avg_meters['loss'].update(loss.item(), input.size(0))
-      avg_meters['JI'].update(jac, input.size(0))
+      avg_meters['JI'].update(ji, input.size(0))
 
       postfix = OrderedDict([('loss' , avg_meters['loss'].avg),('JI' , avg_meters['JI'].avg)])
       pbar.set_postfix(postfix)
       pbar.update(1)
-      
       # write tensorboard
-      if epoch == 1:
+      if epoch == 0 and model_wirte == 0:
         writer.add_graph(net, input)
-      
+        model_wirte = 1
       grid = torchvision.utils.make_grid(input)
-      writer.add_image('images/input', grid)
-      grid = torchvision.utils.make_grid(output)
-      writer.add_image('images/output', grid)
+      writer.add_image('valid/'+str(epoch), grid, 0)
+      grid = torch.sigmoid(output) > 0.5
+      grid = torchvision.utils.make_grid(grid)
+      writer.add_image('valid/'+str(epoch), grid, 1)
       grid = torchvision.utils.make_grid(target)
-      writer.add_image('images/target', grid)
+      writer.add_image('valid/'+str(epoch), grid, 2)
     pbar.close()
 
   return OrderedDict([('loss', avg_meters['loss'].avg), ('JI', avg_meters['JI'].avg)])
@@ -168,17 +177,16 @@ def main():
   now = datetime.datetime.now()
   config = vars(parse_args())
 
-  # generate tensorboard writer
-  writer = SummaryWriter('/content/drive/MyDrive/HeartDiseaseAI/runs/my_board')
-
+  writerpath = '/content/drive/MyDrive/HeartDiseaseAI/runs/tensorboard/'
   # 만약에 best iou score을 기록한 모델이 생간다면 해당 모델의 checkpoint를 저장하기 위해 사용할 이름
   if config['name'] is None:
     if config['deep_supervision']:
-      config['name'] = '%s_%s_deepsupervision' %(config['model'], str(now.strftime("%c")))
+      config['name'] = '%s_deepsupervision_A2C' %(config['model'])
     else:
-      config['name'] = '%s_%s_normal' %(config['model'], str(now.strftime("%c")))
-  os.makedirs('models/%s' %config['name'], exist_ok = True)
+      config['name'] = '%s_normal_A2C' %(config['model'])
 
+  os.makedirs('models/%s' %config['name'], exist_ok = True)
+  writerpath += config['name']
   criterion = BCEDiceLoss().cuda()
   # configuration parameter입력값을 바탕으로 yaml파일로 저장함
   #with open('models/%s/config.yml' % config['name'], 'w') as f:
@@ -190,7 +198,7 @@ def main():
     net = unet_model.__dict__[config['model']](config['num_classes'])
   else:
     net = unet_model.__dict__[config['model']](config['num_classes'],config['deep_supervision'],config['input_channels'])
-
+  # net.load_state_dict(torch.load('/content/drive/MyDrive/HeartDiseaseAI/src/models/UNetPP_normal_A2C/model.pth'))
   net = net.cuda()
 
   params = filter(lambda p:p.requires_grad, net.parameters())
@@ -208,25 +216,34 @@ def main():
   elif config['scheduler'] == 'ConstantLR':
     scheduler = None
   
-  train_dirs = glob(os.path.join(config['dataset'], 'train', '*', '*')) # A2C, A4C image 모두 
-  valid_dirs = glob(os.path.join(config['dataset'], 'validation', '*', '*'))
 
-  train_img_dirs = list(filter(lambda x: x.split('/')[-1].split('.')[-1] == 'png', train_dirs))
-  train_mask_dirs = list(filter(lambda x: x.split('/')[-1].split('.')[-1] == 'npy', train_dirs))
-  valid_img_dirs = list(filter(lambda x: x.split('/')[-1].split('.')[-1] == 'png', valid_dirs))
-  valid_mask_dirs = list(filter(lambda x: x.split('/')[-1].split('.')[-1] == 'npy', valid_dirs))
 
-  train_img_ids = list(set([os.path.splitext(os.path.basename(p))[0] for p in train_dirs]))
-  valid_img_ids = list(set([os.path.splitext(os.path.basename(p))[0] for p in valid_dirs]))
+  train_dirs = glob(os.path.join(config['dataset'], 'train', config['img_type'], '*')) # A2C, A4C image 모두 
+  valid_dirs = glob(os.path.join(config['dataset'], 'validation', config['img_type'], '*'))
 
-  train_transform = Compose([
-    transforms.Flip(),
-    transforms.Normalize(),
-  ])
+  train_img_dirs = sorted(list(filter(lambda x: x.split('/')[-1].split('.')[-1] == 'png', train_dirs)))
+  train_mask_dirs = sorted(list(filter(lambda x: x.split('/')[-1].split('.')[-1] == 'npy', train_dirs)))
+  valid_img_dirs = sorted(list(filter(lambda x: x.split('/')[-1].split('.')[-1] == 'png', valid_dirs)))
+  valid_mask_dirs = sorted(list(filter(lambda x: x.split('/')[-1].split('.')[-1] == 'npy', valid_dirs)))
 
-  valid_transform = Compose([
-    transforms.Normalize(),
-  ])
+  train_img_ids = sorted(list(set([os.path.splitext(os.path.basename(p))[0] for p in train_dirs])))
+  valid_img_ids = sorted(list(set([os.path.splitext(os.path.basename(p))[0] for p in valid_dirs])))
+
+  print(len(train_dirs), len(valid_dirs))
+  print(len(train_img_ids), len(valid_img_ids))
+
+  if (config['rotate']):
+    train_transform = Compose([
+        transforms.HorizontalFlip(p = 0.5),
+        transforms.VerticalFlip(p = 0.5),
+        A.Rotate(limit = 120),
+      ])
+  else:
+    train_transform = Compose([
+      transforms.Flip(),
+    ])
+
+  valid_transform = None
 
   if config['all'] == True:
     train_dataset = HeartDiseaseDataset(
@@ -260,7 +277,6 @@ def main():
       transform = valid_transform
     )
 
-
   train_loader = torch.utils.data.DataLoader(
       train_dataset, batch_size = config['batch_size'],
       shuffle = True,
@@ -279,11 +295,14 @@ def main():
   best_iou = 0
   trigger = 0
 
+  # generate tensorboard writer
+  writer = SummaryWriter(writerpath)
+
   for epoch in range(config['epochs']):
     print(f"Epoch {epoch} / {config['epochs']}")
 
     # train for one epoch
-    train_log = train(net,train_loader, criterion, optimizer, config)
+    train_log = train(net,train_loader, criterion, optimizer, config, writer, epoch)
     # validate for one epoch
     val_log = validate(net,valid_loader, criterion, config, writer, epoch)
 
