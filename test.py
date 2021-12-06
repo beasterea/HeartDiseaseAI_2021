@@ -28,7 +28,8 @@ def parse_args():
     """User must choose the name of the model to save the result"""
     parser.add_argument('--name', default = None)
     """User must tell the directory of the input testing images"""
-    parser.add_argument('--dataset', default = None, help = 'directory of the base datasets')
+    parser.add_argument('--data_path', default = None)
+    parser.add_argument('--data_type', default = None, help = 'validation or test')
     parser.add_argument('--image_type', default = 'A2C')
     args = parser.parse_args()
     return args
@@ -43,7 +44,7 @@ def main():
     net.eval()
 
     # load data
-    test_dirs = sorted(os.path.join(config['dataset'], config['image_type'], '*'))
+    test_dirs = sorted(os.path.join(config['data_path'], config['data_type'], config['image_type'], '*'))
     test_img_dirs = sorted(list(filter(lambda x : x.split('/')[-1] == 'png', test_dirs)))
     test_mask_dirs = sorted(list(filter(lambda x : x.split('/')[-1] == 'npy', test_dirs)))
 

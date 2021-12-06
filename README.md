@@ -20,10 +20,21 @@ conda install pytorch torchvision
 pip install -r requirements.txt
 ```
 
-4. Enable the in the bash command
+4. Enable in the bash command
 ```
-python3 test.py 
+python3 test.py --name [name of the model] --data_path[absolute path of the dataset] --data_type ['validation' / 'test'] --image_type['A2C' / 'A4C']
 ```
 **The Dataset Directory for the Testing Should Be**
 - The input image should be in the '.png' format
 = The result would be stored in a new folder as image form
+
+data_path (absolute path of the dataset)
+|__data_type
+    |__A2C
+    |   |_..png
+    |   |_..npy
+    |   .
+    |   .
+    |__A4C
+        |_..png
+        |_..npy
