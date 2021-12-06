@@ -18,7 +18,7 @@ class SEBlock(nn.Module):
     b, c, _, _ = x.size()
     y = self.pool(x).view(b, c)
     y = self.fc(y).view(b, c, 1, 1)
-    print(y.expand_as(x).shape)
+    #print(y.expand_as(x).shape)
 
     return x * y.expand_as(x)
 
@@ -37,7 +37,7 @@ class ASPPmodule(nn.Module):
     return out
 
 class ASPP(nn.Module):
-  def __init__(self, channel_in, channel_mid, channel_out, momentum = 0.0003, dilation=[1,6,12,18]):
+  def __init__(self, channel_in, channel_mid, channel_out, momentum = 0.0003, dilation= [6,12,18]):
     """
     channel_in은 입력 값의 channel 개수
     channel_out은 출력 값의 channel의 개수 (4개를 concat해서 1024를 만들어야 하는 상황이기 때문에 256로 설정)
@@ -46,7 +46,7 @@ class ASPP(nn.Module):
     self.aspp_1 = ASPPmodule(channel_in, channel_mid, momentum, dilation[0])
     self.aspp_2 = ASPPmodule(channel_in, channel_mid, momentum, dilation[1])
     self.aspp_3 = ASPPmodule(channel_in, channel_mid, momentum, dilation[2])
-    self.aspp_4 = ASPPmodule(channel_in, channel_mid, momentum, dilation[3])
+    #self.aspp_4 = ASPPmodule(channel_in, channel_mid, momentum, dilation[3])
 
     self.conv = nn.Conv2d(channel_mid * len(dilation), channel_out, kernel_size = 1)
   
@@ -54,9 +54,9 @@ class ASPP(nn.Module):
     out_1 = self.aspp_1(x)
     out_2 = self.aspp_2(x)
     out_3 = self.aspp_3(x)
-    out_4 = self.aspp_4(x)
+    #out_4 = self.aspp_4(x)
 
-    out = torch.cat((out_1, out_2, out_3, out_4), 1)
+    out = torch.cat((out_1, out_2, out_3), 1)
     out = self.conv(out)
     
     return out
@@ -104,14 +104,14 @@ class CSEBlock(nn.Module):
 
 
 class HeartSarUnet(nn.Module):
-  def __init__(self, num_classes, first_channel, channel_in_start = 64, channel_mid_start = 4):
+  def __init__(self, num_classes, first_channel, channel_in_start = 12, channel_mid_start = 4):
     super(HeartSarUnet, self).__init__()
     self.down_channels = [channel_in_start * (2**(i-1)) for i in range(1,5)]
-    self.down_channels = [first_channel]+self.down_channels # [first_channel, 64, 128, 256, 512]
+    self.down_channels = [first_channel]+self.down_channels # [first_channel, 64, 128, 256, 512] -> [first_channel, 8, 16, 32, 64]
     #print(self.down_channels)
     self.mid_channels = [channel_mid_start * (2**i) for i in range(4)] # [4, 8, 16, 32]
     #print(self.mid_channels)
-    self.up_channels = [channel_in_start * (2**i) for i in range(4, -1, -1)] # [1024, 512, 256, 128, 64]
+    self.up_channels = [channel_in_start * (2**i) for i in range(4, -1, -1)] # [1024, 512, 256, 128, 64] -> [128, 64, 32 16, 8]
     #print(self.up_channels)
 
     self.cat_channels = [self.down_channels[4-i]+self.up_channels[i] for i in range(5)] # [1536, 756, 384, 192]
@@ -134,11 +134,13 @@ class HeartSarUnet(nn.Module):
 
     self.final_conv = nn.Conv2d(self.up_channels[4], num_classes, kernel_size = 1)
 
+
+
   def forward(self, x):
     ###### Encoder ######
     se_1 = self.down_1(x) # concat with up_4
     down_1 = self.max_pool(se_1)
-    print(down_1.shape)
+    #print(down_1.shape)
 
     se_2 = self.down_2(down_1) # concat with up_3
     down_2 = self.max_pool(se_2)
@@ -151,7 +153,7 @@ class HeartSarUnet(nn.Module):
 
     ###### Bridge #####
     aspp_1 = self.ASPP_1(down_4)
-    print(f"aspp_1 shape : {aspp_1.shape}")
+    #print(f"aspp_1 shape : {aspp_1.shape}")
 
     ##### Decoder #######
     up4_1 = self.upsample(aspp_1)

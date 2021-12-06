@@ -1,4 +1,3 @@
-from _typeshed import NoneType
 import os, argparse
 from glob import glob
 import numpy as np
