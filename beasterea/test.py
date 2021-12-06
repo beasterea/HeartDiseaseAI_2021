@@ -9,7 +9,7 @@ from albumentations.core.composition import Compose
 from tqdm import tqdm
 
 from dataset import HeartDiseaseDataset
-from metrics import iou_score, dice_coef
+from metrics import iou_score, dice_coef, crop_img
 from utils import AverageMeter
 from SarUNet.model import HeartSarUnet
 
@@ -68,6 +68,7 @@ def main():
     avg_meter = {'iou' : AverageMeter(), 'dice':AverageMeter()}
 
     with torch.no_grad():
+        idx = 0
         for input, target, info in tqdm(test_loader, total = len(test_loader)):
             input = input.cuda()
             target = target.cuda()
@@ -78,16 +79,18 @@ def main():
 
             iou = iou_score(output, target, img_shape, crop = True)
             dice = dice_coef(output, target, img_shape)
-
-            avg_meter['iou'].update(iou[1], input.size(0))
+            avg_meter['iou'].update(iou[-1], input.size(0))
             avg_meter['dice'].update(dice, input.size(0))
-            output = torch.sigmoid(output).cpu().numpy()
+            output_ = crop_img(output, (img_shape[0][0], img_shape[1][0]))
+            output_ = torch.sigmoid(output_).cpu().numpy()
 
             img_id = list([os.path.splitext(os.path.basename(p))[0] for p in test_img_dirs])
 
             for i in range(len(output)):
-                cv2.imwrite(os.path.join(config['data_type'], config['image_type'], img_id[i] + '.png'), 
-                (output[i]>0.5).astype('uint8'))
+                output_[i][0] = output_[i][0] > 0.5
+                cv2.imwrite(os.path.join(config['data_path'] , config['data_type'], config['image_type'], 'result',img_id[idx] + '.png'), 
+                (output_[i][0]).astype(float)*255)
+                idx += 1
     print('JI : %.4f  Dice : %.4f' %(avg_meter['iou'].avg, avg_meter['dice'].avg))
 
     torch.cuda.empty_cache()
