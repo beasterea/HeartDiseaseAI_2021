@@ -15,7 +15,7 @@ def crop_img(img, input_shape):
 
   return cropped
 
-def iou_score(predict, target, input_shape, crop = True, sigmoid = False, softmax = True):
+def iou_score(predict, target, input_shape, crop = True, sigmoid = False, softmax = False):
   smooth = 1e-5
   intersection = 0
   union = 0
@@ -70,7 +70,7 @@ def iou_score(predict, target, input_shape, crop = True, sigmoid = False, softma
 
       threshold = np.ceil(np.clip(20 * (iou - 0.5), 0, 10)) / 10
     #print(f"intersection:{intersection} union:{union} jaccard : {jac/n}")
-    return (intersection + smooth)/ (union+smooth), jac/n
+    return (intersection + smooth)/ (union+smooth)
 
 
   #predict = crop_img(predict, input_shape)
@@ -97,13 +97,16 @@ def dice_coef(predict, target, input_shape):
   n = predict.size(0)
   dice=  0
   for i in range(n):
-    predict_ = crop_img(predict[i], (input_shape[0][i], input_shape[1][i]))
-    target_ = crop_img(target[i], (input_shape[0][i], input_shape[1][i]))
+    predict_ = crop_img(predict[i], (input_shape[0][i], input_shape[1][i]))[0]
+    target_ = crop_img(target[i], (input_shape[0][i], input_shape[1][i]))[0]
 
     predict_ = torch.sigmoid(predict_).view(-1).data.cpu().numpy()
+    target_ = target_.clone().detach()
     target_ = target_.view(-1).data.cpu().numpy()
 
     intersection = (predict_ * target_).sum()
-    dice += (2*intersection + smooth) / (predict.sum() + target.sum() + smooth)
+    dice += (2*intersection + smooth) / (predict_.sum() + target_.sum() + smooth)
   return dice / n
+
+
   

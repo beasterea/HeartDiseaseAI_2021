@@ -73,7 +73,8 @@ def main():
 
             iou = iou_score(output, target, img_shape, crop = True)
             dice = dice_coef(output, target, img_shape)
-            avg_meter['iou'].update(iou, input.size(0))
+
+            avg_meter['iou'].update(iou[1], input.size(0))
             avg_meter['dice'].update(dice, input.size(0))
             output = torch.sigmoid(output).cpu().numpy()
 
