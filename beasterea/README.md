@@ -26,6 +26,12 @@ current working directory
 |__model.py
 |__crop_sarunet_A2C_bce01.pth
 |__sarunet_A4C.pth
+|__data_path
+    |__test
+        |__A2C
+            |__result (MAKE A FOLDER TO SAVE THE RESULT MASKS FROM THE NET WITH THE NAME 'result')
+        |__A4C
+            |__result (MAKE A FOLDER TO SAVE THE RESULT MASKS FROM THE NET WITH THE NAME 'result')
 ```
 
 4. Enable in the bash command
