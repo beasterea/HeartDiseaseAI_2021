@@ -19,6 +19,11 @@ conda install pytorch torchvision
 3. Install requirements
 ```
 pip install -r requirements.txt
+current working directory
+|__test.py
+|__model.py
+|__crop_sarunet_A2C_bce01.pth
+|__sarunet_A4C.pth
 ```
 
 4. Enable in the bash command
