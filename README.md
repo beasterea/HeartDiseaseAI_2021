@@ -14,6 +14,7 @@ conda activate <enviornment_name>
 2. Install PyTorch
 ```
 conda install pytorch torchvision 
+```
 
 3. Install requirements
 ```
@@ -28,6 +29,7 @@ python3 test.py --name [name of the model] --data_path[absolute path of the data
 - The input image should be in the '.png' format
 = The result would be stored in a new folder as image form
 
+```
 data_path (absolute path of the dataset)
 |__data_type
     |__A2C
@@ -38,3 +40,4 @@ data_path (absolute path of the dataset)
     |__A4C
         |_..png
         |_..npy
+```
