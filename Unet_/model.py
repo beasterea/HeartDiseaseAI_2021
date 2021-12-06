@@ -24,7 +24,7 @@ class VGGBlock(nn.Module):
     return out
 
 class UNet(nn.Module):
-  def __init__(self, num_classes, channel_in = 3, start_filter = 32):
+  def __init__(self, num_classes, channel_in = 3, start_filter = 16):
     super().__init__()
 
     self.filters = []
@@ -64,7 +64,7 @@ class UNet(nn.Module):
     return out
 
 class UNetPP(nn.Module):
-    def __init__(self, num_classes, deep_supervision = True, channel_in = 3, start_filter = 16):
+    def __init__(self, num_classes, deep_supervision = False, channel_in = 3, start_filter = 8):
         super().__init__()
 
         nb_filter = []
